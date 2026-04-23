@@ -4,6 +4,62 @@ const { PrismaClient } = require("@prisma/client")
 const router = express.Router()
 const prisma = new PrismaClient()
 
+// GET search users
+router.get("/search/users", async (req, res) => {
+  try {
+    const { q } = req.query
+
+    if (!q || q.trim().length < 1) {
+      return res.json([])
+    }
+
+    const users = await prisma.user.findMany({
+      where: {
+        OR: [
+          { username: { contains: q, mode: "insensitive" } },
+          { bio: { contains: q, mode: "insensitive" } }
+        ],
+        NOT: { id: req.userId } // exclude current user
+      },
+      select: {
+        id: true,
+        username: true,
+        bio: true,
+        avatar: true,
+        _count: { select: { followers: true, posts: true } }
+      },
+      take: 10 // max 10 results
+    })
+
+    res.json(users)
+  } catch (error) {
+    res.status(500).json({ error: "Search failed" })
+  }
+})
+
+
+// GET current logged in user
+router.get("/me/profile", async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        bio: true,
+        avatar: true,
+        _count: {
+          select: { followers: true, following: true, posts: true }
+        }
+      }
+    })
+    res.json(user)
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch profile" })
+  }
+})
+
 // GET user profile
 router.get("/:username", async (req, res) => {
   try {
@@ -32,28 +88,6 @@ router.get("/:username", async (req, res) => {
     res.json(user)
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch user" })
-  }
-})
-
-// GET current logged in user
-router.get("/me/profile", async (req, res) => {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.userId },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        bio: true,
-        avatar: true,
-        _count: {
-          select: { followers: true, following: true, posts: true }
-        }
-      }
-    })
-    res.json(user)
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch profile" })
   }
 })
 
@@ -149,5 +183,25 @@ router.get("/:id/following", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch following" })
   }
 })
+
+// PUT — update profile
+router.put("/me/profile", async (req, res) => {
+  try {
+    const { bio, avatar } = req.body
+    const user = await prisma.user.update({
+      where: { id: req.userId },
+      data: { bio, avatar },
+      select: {
+        id: true, username: true, email: true, bio: true, avatar: true
+      }
+    })
+    res.json(user)
+  } catch (error) {
+    res.status(500).json({ error: "Failed to update profile" })
+  }
+})
+
+
+
 
 module.exports = router

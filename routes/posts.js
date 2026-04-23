@@ -4,67 +4,104 @@ const { PrismaClient } = require("@prisma/client")
 const router = express.Router()
 const prisma = new PrismaClient()
 
+
+
+
 // GET all posts — explore page
+// GET all posts — with pagination
 router.get("/", async (req, res) => {
   try {
-    const posts = await prisma.post.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        user: {
-          select: { id: true, username: true, avatar: true }
-        },
-        likes: true,
-        comments: {
-          include: {
-            user: { select: { id: true, username: true, avatar: true } }
+    const page = parseInt(req.query.page) || 1
+    const limit = parseInt(req.query.limit) || 10
+    const skip = (page - 1) * limit
+
+    const [posts, total] = await Promise.all([
+      prisma.post.findMany({
+        skip,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: { select: { id: true, username: true, avatar: true } },
+          likes: true,
+          comments: {
+            include: {
+              user: { select: { id: true, username: true, avatar: true } }
+            },
+            orderBy: { createdAt: "desc" }
           },
-          orderBy: { createdAt: "desc" }
-        },
-        _count: { select: { likes: true, comments: true } }
+          _count: { select: { likes: true, comments: true } }
+        }
+      }),
+      prisma.post.count()
+    ])
+
+    res.json({
+      posts,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasMore: page < Math.ceil(total / limit)
       }
     })
-    res.json(posts)
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch posts" })
   }
 })
-
 // GET feed — posts from followed users
+// GET feed — with pagination
 router.get("/feed", async (req, res) => {
   try {
-    // get list of users the logged in user follows
+    const page = parseInt(req.query.page) || 1
+    const limit = parseInt(req.query.limit) || 10
+    const skip = (page - 1) * limit
+
     const following = await prisma.follow.findMany({
       where: { followerId: req.userId },
       select: { followingId: true }
     })
 
     const followingIds = following.map(f => f.followingId)
-
-    // include own posts in feed
     followingIds.push(req.userId)
 
-    const posts = await prisma.post.findMany({
-      where: { userId: { in: followingIds } },
-      orderBy: { createdAt: "desc" },
-      include: {
-        user: {
-          select: { id: true, username: true, avatar: true }
-        },
-        likes: true,
-        comments: {
-          include: {
-            user: { select: { id: true, username: true, avatar: true } }
+    const [posts, total] = await Promise.all([
+      prisma.post.findMany({
+        where: { userId: { in: followingIds } },
+        skip,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: { select: { id: true, username: true, avatar: true } },
+          likes: true,
+          comments: {
+            include: {
+              user: { select: { id: true, username: true, avatar: true } }
+            },
+            orderBy: { createdAt: "desc" }
           },
-          orderBy: { createdAt: "desc" }
-        },
-        _count: { select: { likes: true, comments: true } }
+          _count: { select: { likes: true, comments: true } }
+        }
+      }),
+      prisma.post.count({ where: { userId: { in: followingIds } } })
+    ])
+
+    res.json({
+      posts,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasMore: page < Math.ceil(total / limit)
       }
     })
-    res.json(posts)
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch feed" })
   }
 })
+
+
 
 // GET one post
 router.get("/:id", async (req, res) => {
